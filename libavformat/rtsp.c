@@ -478,6 +478,7 @@ static void sdp_parse_line(AVFormatContext *s, SDPParseState *s1,
                                               sdp_ip_str);
 
         }
+        av_freep(sdp_ip_str);
         break;
     case 's':
         av_dict_set(&s->metadata, "title", p, 0);
@@ -702,6 +703,7 @@ static void sdp_parse_line(AVFormatContext *s, SDPParseState *s1,
                     }
                 }
             }
+            av_freep(dest_addr);
         } else {
             if (rt->server_type == RTSP_SERVER_WMS)
                 ff_wms_parse_sdp_a_line(s, p);
