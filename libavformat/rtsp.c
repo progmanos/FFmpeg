@@ -19,6 +19,8 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#include <stdbool.h>
+
 #include "config_components.h"
 
 #include "libavutil/avassert.h"
@@ -389,16 +391,19 @@ typedef struct SDPParseState {
 } SDPParseState;
 
 static void copy_default_source_addrs(struct RTSPSource **addrs, int count,
-                                      struct RTSPSource ***dest, int *dest_count)
+                                      struct RTSPSource ***dest, int *dest_count, const char* sdp_ip_str)
 {
     RTSPSource *rtsp_src, *rtsp_src2;
     int i;
+    const char* wildcard_dest = "*";
     for (i = 0; i < count; i++) {
         rtsp_src = addrs[i];
-        rtsp_src2 = av_memdup(rtsp_src, sizeof(*rtsp_src));
-        if (!rtsp_src2)
-            continue;
-        dynarray_add(dest, dest_count, rtsp_src2);
+        if ((strcmp(rtsp_src->dest_addr, sdp_ip_str) == 0) || (strcmp(rtsp_src->dest_addr, wildcard_dest) == 0)) {
+            rtsp_src2 = av_memdup(rtsp_src, sizeof(*rtsp_src));
+            if (!rtsp_src2)
+                continue;
+            dynarray_add(dest, dest_count, rtsp_src2);
+        }
     }
 }
 
@@ -423,7 +428,7 @@ static void sdp_parse_line(AVFormatContext *s, SDPParseState *s1,
 {
     RTSPState *rt = s->priv_data;
     char buf1[64], st_type[64];
-    const char *p;
+    const char *p, *dest_addr;
     enum AVMediaType codec_type;
     int payload_type;
     AVStream *st;
@@ -448,6 +453,7 @@ static void sdp_parse_line(AVFormatContext *s, SDPParseState *s1,
         get_word_sep(buf1, sizeof(buf1), "/", &p);
         if (get_sockaddr(s, buf1, &sdp_ip))
             return;
+
         ttl = 16;
         if (*p == '/') {
             p++;
@@ -461,6 +467,7 @@ static void sdp_parse_line(AVFormatContext *s, SDPParseState *s1,
             rtsp_st = rt->rtsp_streams[rt->nb_rtsp_streams - 1];
             rtsp_st->sdp_ip = sdp_ip;
             rtsp_st->sdp_ttl = ttl;
+
         }
         break;
     case 's':
@@ -504,14 +511,7 @@ static void sdp_parse_line(AVFormatContext *s, SDPParseState *s1,
         rtsp_st->sdp_ip = s1->default_ip;
         rtsp_st->sdp_ttl = s1->default_ttl;
 
-        copy_default_source_addrs(s1->default_include_source_addrs,
-                                  s1->nb_default_include_source_addrs,
-                                  &rtsp_st->include_source_addrs,
-                                  &rtsp_st->nb_include_source_addrs);
-        copy_default_source_addrs(s1->default_exclude_source_addrs,
-                                  s1->nb_default_exclude_source_addrs,
-                                  &rtsp_st->exclude_source_addrs,
-                                  &rtsp_st->nb_exclude_source_addrs);
+
 
         get_word(buf1, sizeof(buf1), &p); /* port */
         rtsp_st->sdp_port = atoi(buf1);
@@ -672,11 +672,15 @@ static void sdp_parse_line(AVFormatContext *s, SDPParseState *s1,
             // not checking that the destination address actually matches or is wildcard
             get_word(buf1, sizeof(buf1), &p);
 
+            dest_addr = av_strdup(buf1);
             while (*p != '\0') {
                 rtsp_src = av_mallocz(sizeof(*rtsp_src));
-                if (!rtsp_src)
+                if (!rtsp_src) {
+                    av_freep(&dest_addr);
                     return;
-                get_word(rtsp_src->addr, sizeof(rtsp_src->addr), &p);
+                }
+                av_strlcpy(rtsp_src->dest_addr, dest_addr, sizeof(rtsp_src->dest_addr));
+                get_word(rtsp_src->src_addr, sizeof(rtsp_src->src_addr), &p);
                 if (exclude) {
                     if (s->nb_streams == 0) {
                         dynarray_add(&s1->default_exclude_source_addrs, &s1->nb_default_exclude_source_addrs, rtsp_src);
@@ -693,6 +697,7 @@ static void sdp_parse_line(AVFormatContext *s, SDPParseState *s1,
                     }
                 }
             }
+            av_freep(&dest_addr);
         } else {
             if (rt->server_type == RTSP_SERVER_WMS)
                 ff_wms_parse_sdp_a_line(s, p);
@@ -717,13 +722,31 @@ int ff_sdp_parse(AVFormatContext *s, const char *content)
 {
     const char *p;
     int letter, i;
-    char buf[SDP_MAX_SIZE], *q;
+    char buf[SDP_MAX_SIZE], sdp_ip_str[50], *q;
+    bool parsed_first_media_desc = false;
     SDPParseState sdp_parse_state = { { 0 } }, *s1 = &sdp_parse_state;
 
     p = content;
     for (;;) {
         p += strspn(p, SPACE_CHARS);
         letter = *p;
+        if(parsed_first_media_desc && (letter == 'm' || letter == '\0')) {
+            RTSPState *rt = s->priv_data;
+            RTSPStream *rtsp_st = rt->rtsp_streams[rt->nb_rtsp_streams - 1];
+            getnameinfo((struct sockaddr*) &rtsp_st->sdp_ip,
+                                            sizeof(rtsp_st->sdp_ip),
+                                            sdp_ip_str, sizeof(sdp_ip_str), NULL, 0, NI_NUMERICHOST);
+            copy_default_source_addrs(s1->default_include_source_addrs,
+                                            s1->nb_default_include_source_addrs,
+                                            &rtsp_st->include_source_addrs,
+                                            &rtsp_st->nb_include_source_addrs,
+                                            sdp_ip_str);
+            copy_default_source_addrs(s1->default_exclude_source_addrs,
+                                            s1->nb_default_exclude_source_addrs,
+                                            &rtsp_st->exclude_source_addrs,
+                                            &rtsp_st->nb_exclude_source_addrs,
+                                            sdp_ip_str);
+        }
         if (letter == '\0')
             break;
         p++;
@@ -738,7 +761,11 @@ int ff_sdp_parse(AVFormatContext *s, const char *content)
             p++;
         }
         *q = '\0';
+
         sdp_parse_line(s, s1, letter, buf);
+        if(letter == 'm')
+            parsed_first_media_desc = true;
+
     next_line:
         while (*p != '\n' && *p != '\0')
             p++;
@@ -859,10 +886,11 @@ int ff_rtsp_open_transport_ctx(AVFormatContext *s, RTSPStream *rtsp_st)
         rtsp_st->transport_priv = ff_rdt_parse_open(s, st->index,
                                             rtsp_st->dynamic_protocol_context,
                                             rtsp_st->dynamic_handler);
-    else if (CONFIG_RTPDEC)
+    else if (CONFIG_RTPDEC) {
         rtsp_st->transport_priv = ff_rtp_parse_open(s, st,
                                          rtsp_st->sdp_payload_type,
                                          reordering_queue_size);
+    }
 
     if (!rtsp_st->transport_priv) {
          return AVERROR(ENOMEM);
@@ -1452,6 +1480,18 @@ retry:
     return 0;
 }
 
+static void append_source_addrs(char *buf, int size, const char *name,
+                                int count, struct RTSPSource **addrs)
+{
+    int i;
+    if (!count)
+        return;
+    av_strlcatf(buf, size, "&%s=%s", name, addrs[0]->src_addr);
+    for (i = 1; i < count; i++) {
+        av_strlcatf(buf, size, ",%s", addrs[i]->src_addr);
+    }
+}
+
 int ff_rtsp_make_setup_request(AVFormatContext *s, const char *host, int port,
                               int lower_transport, const char *real_challenge)
 {
@@ -1509,6 +1549,11 @@ int ff_rtsp_make_setup_request(AVFormatContext *s, const char *host, int port,
                 rtsp_st = rt->rtsp_streams[i > rtx ? i : i - 1];
         } else
             rtsp_st = rt->rtsp_streams[i];
+
+        /* RTP/UDP Source Specific Multicast (SSM) */
+        if (ff_is_multicast_address((struct sockaddr*) &rtsp_st->sdp_ip)) {
+            lower_transport = RTSP_LOWER_TRANSPORT_UDP_MULTICAST;
+        }
 
         /* RTP/UDP */
         if (lower_transport == RTSP_LOWER_TRANSPORT_UDP) {
@@ -1666,7 +1711,7 @@ int ff_rtsp_make_setup_request(AVFormatContext *s, const char *host, int port,
             break;
         }
         case RTSP_LOWER_TRANSPORT_UDP_MULTICAST: {
-            char url[MAX_URL_SIZE], namebuf[50], optbuf[20] = "";
+            char url[MAX_URL_SIZE], namebuf[50], optbuf[1024] = "";
             struct sockaddr_storage addr;
             int port, ttl;
             AVDictionary *opts = map_to_opts(rt);
@@ -1682,6 +1727,20 @@ int ff_rtsp_make_setup_request(AVFormatContext *s, const char *host, int port,
             }
             if (ttl > 0)
                 snprintf(optbuf, sizeof(optbuf), "?ttl=%d", ttl);
+
+            if (rtsp_st->nb_include_source_addrs > 0) {
+                if(strlen(optbuf) == 0 ) {
+                    snprintf(optbuf, sizeof(optbuf), "?");
+                }
+
+                append_source_addrs(optbuf, sizeof(optbuf), "sources",
+                                                rtsp_st->nb_include_source_addrs,
+                                                rtsp_st->include_source_addrs);
+                append_source_addrs(optbuf, sizeof(optbuf), "block",
+                                    rtsp_st->nb_exclude_source_addrs,
+                                    rtsp_st->exclude_source_addrs);
+            }
+
             getnameinfo((struct sockaddr*) &addr, sizeof(addr),
                         namebuf, sizeof(namebuf), NULL, 0, NI_NUMERICHOST);
             ff_url_join(url, sizeof(url), "rtp", NULL, namebuf,
@@ -2383,16 +2442,7 @@ static int sdp_probe(const AVProbeData *p1)
     return 0;
 }
 
-static void append_source_addrs(char *buf, int size, const char *name,
-                                int count, struct RTSPSource **addrs)
-{
-    int i;
-    if (!count)
-        return;
-    av_strlcatf(buf, size, "&%s=%s", name, addrs[0]->addr);
-    for (i = 1; i < count; i++)
-        av_strlcatf(buf, size, ",%s", addrs[i]->addr);
-}
+
 
 static int sdp_read_header(AVFormatContext *s)
 {
