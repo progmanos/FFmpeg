@@ -442,7 +442,8 @@ typedef struct RTSPState {
 #define RTSP_FLAG_SATIP_RAW   0x20   /**< Export SAT>IP stream as raw MPEG-TS */
 
 typedef struct RTSPSource {
-    char addr[128]; /**< Source-specific multicast include source IP address (from SDP content) */
+    char dest_addr[128]; /**< Source-specific multicast destination IP address (from SDP content) */
+    char src_addr[128]; /**< Source-specific multicast include source IP address (from SDP content) */
 } RTSPSource;
 
 /**
