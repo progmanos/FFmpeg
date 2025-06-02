@@ -113,6 +113,12 @@ typedef struct FFInputFormat {
      * (RTSP).
      */
     int (*read_play)(struct AVFormatContext *);
+    
+    /**
+     * Play a network-based stream (e.g. RTSP stream) with a given play rate
+     * (e.g. Scale value for RTSP) and timestamp position.
+     */
+    int (*read_play_with_rate)(struct AVFormatContext *s, double play_rate, int stream_index, int64_t timestamp);
 
     /**
      * Pause playing - only meaningful if using a network-based format

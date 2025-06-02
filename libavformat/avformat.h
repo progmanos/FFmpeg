@@ -2359,6 +2359,12 @@ int avformat_flush(AVFormatContext *s);
 int av_read_play(AVFormatContext *s);
 
 /**
+ * Play a network-based stream (e.g. RTSP stream) with a given play rate
+ * (e.g. Scale value for RTSP) and timestamp position.
+ */
+int av_read_play_with_rate(AVFormatContext *s, double play_rate, int stream_index, int64_t timestamp);
+
+/**
  * Pause a network-based stream (e.g. RTSP stream).
  *
  * Use av_read_play() to resume it.

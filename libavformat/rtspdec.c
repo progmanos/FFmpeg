@@ -39,6 +39,7 @@
 #include "tls.h"
 #include "url.h"
 #include "version.h"
+#include <stdio.h>
 
 static const struct RTSPStatusMessage {
     enum RTSPStatusCode code;
@@ -527,7 +528,7 @@ static int rtsp_read_play(AVFormatContext *s)
 {
     RTSPState *rt = s->priv_data;
     RTSPMessageHeader reply1, *reply = &reply1;
-    int i;
+    int i, cmd_char_count = 0;
     char cmd[MAX_URL_SIZE];
 
     av_log(s, AV_LOG_DEBUG, "hello state=%d\n", rt->state);
@@ -564,11 +565,17 @@ static int rtsp_read_play(AVFormatContext *s)
         if (rt->state == RTSP_STATE_PAUSED) {
             cmd[0] = 0;
         } else {
-            snprintf(cmd, sizeof(cmd),
+           
+            cmd_char_count += snprintf(cmd, sizeof(cmd),
                      "Range: npt=%"PRId64".%03"PRId64"-\r\n",
                      rt->seek_timestamp / AV_TIME_BASE,
                      rt->seek_timestamp / (AV_TIME_BASE / 1000) % 1000);
+            
+            snprintf(cmd + cmd_char_count, sizeof(cmd) - cmd_char_count, "Scale: %f\r\n", rt->scale);
+                     
         }
+        
+       
         ff_rtsp_send_cmd(s, "PLAY", rt->control_uri, cmd, reply, NULL);
         if (reply->status_code != RTSP_STATUS_OK) {
             return ff_rtsp_averror(reply->status_code, -1);
@@ -591,6 +598,15 @@ static int rtsp_read_play(AVFormatContext *s)
     }
     rt->state = RTSP_STATE_STREAMING;
     return 0;
+}
+
+static int rtsp_read_play_with_rate(AVFormatContext *s, double play_rate, int stream_index, int64_t timestamp) {
+    RTSPState *rt = s->priv_data;
+    rt->seek_timestamp = av_rescale_q(timestamp,
+                                      s->streams[stream_index]->time_base,
+                                      AV_TIME_BASE_Q);
+    rt->scale = play_rate;
+    return rtsp_read_play(s);
 }
 
 /* pause the stream */
@@ -1006,5 +1022,6 @@ const FFInputFormat ff_rtsp_demuxer = {
     .read_close     = rtsp_read_close,
     .read_seek      = rtsp_read_seek,
     .read_play      = rtsp_read_play,
+    .read_play_with_rate = rtsp_read_play_with_rate,
     .read_pause     = rtsp_read_pause,
 };

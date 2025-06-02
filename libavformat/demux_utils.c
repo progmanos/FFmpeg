@@ -179,6 +179,12 @@ int av_read_play(AVFormatContext *s)
     return AVERROR(ENOSYS);
 }
 
+int av_read_play_with_rate(AVFormatContext *s, double play_rate, int stream_index, int64_t timestamp) {
+    if (ffifmt(s->iformat)->read_play_with_rate)
+        return ffifmt(s->iformat)->read_play_with_rate(s, play_rate, stream_index, timestamp);
+    return AVERROR(ENOSYS); 
+}
+
 int av_read_pause(AVFormatContext *s)
 {
     if (ffifmt(s->iformat)->read_pause)

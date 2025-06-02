@@ -1998,6 +1998,7 @@ redirect:
     av_strlcpy(rt->real_challenge, real_challenge, sizeof(rt->real_challenge));
     rt->state = RTSP_STATE_IDLE;
     rt->seek_timestamp = 0; /* default is to start stream at position zero */
+    rt->scale = 1.0; /* default is to play at the normal rate */
     return 0;
  fail:
     ff_rtsp_close_streams(s);

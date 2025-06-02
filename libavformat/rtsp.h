@@ -245,6 +245,16 @@ typedef struct RTSPState {
      * whenever we resume playback. Either way, the value is only used once,
      * see rtsp_read_play() and rtsp_read_seek(). */
     int64_t seek_timestamp;
+    
+    /** the scale value requested when calling av_read_play(). This value
+     * is subsequently used as part of the "Scale" parameter when emitting
+     * the RTSP PLAY command. The "Scale" parameter determines the stream play 
+     * rate. A value of 1 represents the normal play rate. Any other value is 
+     * in regards to the normal play rate. A negative value represents reverse
+     * playback. If we are currently playing, this command is called instantly. 
+     * If we are currently paused, this command is called whenever we resume 
+     * playback.  */
+    double scale;
 
     int seq;                          /**< RTSP command sequence number */
 
